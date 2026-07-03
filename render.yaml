@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: ari-lottery-api
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm run server
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: CLIENT_URL
+        value: https://app.ari-platform.com
+      - key: CLIENT_URLS
+        value: https://app.ari-platform.com
+      - key: CRON_SCHEDULE
+        value: "0 0 */3 * *"
+      - key: DISABLE_LOTTERY_CRON
+        value: "false"
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ADMIN_API_KEY
+        sync: false
