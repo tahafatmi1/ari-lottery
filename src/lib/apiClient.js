@@ -1,4 +1,6 @@
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'https://ari-lottery.onrender.com';
+const apiBaseUrl = (
+  import.meta.env.VITE_API_BASE_URL || 'https://ari-lottery.onrender.com'
+).replace(/\/$/, '');
 
 async function fetchJson(path, options = {}) {
   const response = await fetch(`${apiBaseUrl}${path}`, {
