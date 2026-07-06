@@ -62,6 +62,16 @@ function isAllowedOrigin(origin) {
   }
 }
 
+function getCheckoutRedirectBaseUrl(request) {
+  const origin = request.get('origin');
+
+  if (origin && isAllowedOrigin(origin)) {
+    return origin.replace(/\/$/, '');
+  }
+
+  return clientUrl.replace(/\/$/, '');
+}
+
 function requestHasAdminAccess(request) {
   if (!adminApiKey) {
     return false;
@@ -623,6 +633,7 @@ app.post('/create-checkout-session', paymentLimiter, async (request, response) =
 
   const { user_id: userId, quantity } = request.body ?? {};
   const tokenQuantity = Number(quantity);
+  const checkoutRedirectBaseUrl = getCheckoutRedirectBaseUrl(request);
   let checkoutUserId;
 
   try {
@@ -664,8 +675,8 @@ app.post('/create-checkout-session', paymentLimiter, async (request, response) =
         demo_auth_disabled: String(demoAuthDisabled),
         quantity: String(tokenQuantity),
       },
-      success_url: `${clientUrl}/dashboard`,
-      cancel_url: `${clientUrl}/buy`,
+      success_url: `${checkoutRedirectBaseUrl}/dashboard`,
+      cancel_url: `${checkoutRedirectBaseUrl}/buy`,
     });
 
     response.json({ id: session.id });
