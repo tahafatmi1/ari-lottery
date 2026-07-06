@@ -3,9 +3,10 @@ import { useMemo, useState } from 'react';
 import AppShell from '../components/AppShell.jsx';
 import PageLoader from '../components/PageLoader.jsx';
 import useCurrentUser from '../hooks/useCurrentUser.js';
+import { createCheckoutSession } from '../lib/apiClient.js';
+import { DEMO_AUTH_DISABLED } from '../lib/demoMode.js';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4242';
 const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null;
 
 export default function BuyTokens() {
@@ -38,22 +39,12 @@ export default function BuyTokens() {
     setPaying(true);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/create-checkout-session`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: user.id,
-          quantity: total,
-        }),
+      // CLIENT DEMO MODE: the backend assigns the demo user for Checkout metadata.
+      // When auth is restored, include the authenticated user id again if needed.
+      const payload = await createCheckoutSession({
+        quantity: total,
+        userId: DEMO_AUTH_DISABLED ? undefined : user.id,
       });
-
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.error || 'Unable to start checkout.');
-      }
 
       const stripe = await stripePromise;
 

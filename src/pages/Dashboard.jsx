@@ -7,6 +7,8 @@ import StatCard from '../components/StatCard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import TokensView from '../components/TokensView.jsx';
 import useCurrentUser from '../hooks/useCurrentUser.js';
+import { getDemoDashboardData } from '../lib/apiClient.js';
+import { DEMO_AUTH_DISABLED } from '../lib/demoMode.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { formatCurrency, formatDateTime } from '../utils/formatters.js';
 
@@ -30,9 +32,39 @@ export default function Dashboard() {
 
     let isMounted = true;
 
+    function applyDashboardData(payload) {
+      setTokens(payload.tokens ?? []);
+      setTransactions(payload.transactions ?? []);
+      setDraws(payload.draws ?? []);
+      setOwnWins(payload.ownWins ?? []);
+      setSummary({
+        activeTokens: payload.summary?.activeTokens ?? 0,
+        usedTokens: payload.summary?.usedTokens ?? 0,
+        spent: payload.summary?.spent ?? 0,
+        purchased: payload.summary?.purchased ?? 0,
+      });
+    }
+
     async function loadDashboardData() {
       setDataLoading(true);
       setError('');
+
+      if (DEMO_AUTH_DISABLED) {
+        try {
+          const payload = await getDemoDashboardData();
+
+          if (!isMounted) return;
+
+          applyDashboardData(payload);
+        } catch (dashboardError) {
+          if (!isMounted) return;
+
+          setError(dashboardError.message);
+        }
+
+        setDataLoading(false);
+        return;
+      }
 
       const [
         tokensResult,
@@ -96,21 +128,23 @@ export default function Dashboard() {
       if (firstError) {
         setError('Dashboard data is unavailable until the Supabase tables and RLS policies are ready.');
       } else {
-        setTokens(tokensResult.data ?? []);
-        setTransactions(transactionsResult.data ?? []);
-        setDraws(drawsResult.data ?? []);
-        setOwnWins(winsResult.data ?? []);
-        setSummary({
-          activeTokens: activeCountResult.count ?? 0,
-          usedTokens: usedCountResult.count ?? 0,
-          spent: (transactionTotalsResult.data ?? []).reduce(
-            (sum, transaction) => sum + Number(transaction.amount || 0),
-            0,
-          ),
-          purchased: (transactionTotalsResult.data ?? []).reduce(
-            (sum, transaction) => sum + Number(transaction.tokens_purchased || 0),
-            0,
-          ),
+        applyDashboardData({
+          tokens: tokensResult.data ?? [],
+          transactions: transactionsResult.data ?? [],
+          draws: drawsResult.data ?? [],
+          ownWins: winsResult.data ?? [],
+          summary: {
+            activeTokens: activeCountResult.count ?? 0,
+            usedTokens: usedCountResult.count ?? 0,
+            spent: (transactionTotalsResult.data ?? []).reduce(
+              (sum, transaction) => sum + Number(transaction.amount || 0),
+              0,
+            ),
+            purchased: (transactionTotalsResult.data ?? []).reduce(
+              (sum, transaction) => sum + Number(transaction.tokens_purchased || 0),
+              0,
+            ),
+          },
         });
       }
 
@@ -118,6 +152,15 @@ export default function Dashboard() {
     }
 
     loadDashboardData();
+
+    if (DEMO_AUTH_DISABLED) {
+      const refreshTimer = window.setInterval(loadDashboardData, 15000);
+
+      return () => {
+        isMounted = false;
+        window.clearInterval(refreshTimer);
+      };
+    }
 
     const tokensChannel = supabase
       .channel(`dashboard-tokens:${user.id}`)

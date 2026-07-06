@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import Profile from './pages/Profile.jsx';
 import Tokens from './pages/Tokens.jsx';
 import Transactions from './pages/Transactions.jsx';
+import { DEMO_AUTH_DISABLED } from './lib/demoMode.js';
 import { isSupabaseConfigured, supabase } from './lib/supabaseClient.js';
 
 function FullPageLoader() {
@@ -25,6 +26,13 @@ function ProtectedRoute({ children }) {
     let isMounted = true;
 
     async function verifyUser() {
+      // CLIENT DEMO MODE: route protection is bypassed temporarily for client demos.
+      // Set VITE_DEMO_AUTH_DISABLED=false to restore Supabase Auth protection.
+      if (DEMO_AUTH_DISABLED) {
+        setStatus('authenticated');
+        return;
+      }
+
       if (!isSupabaseConfigured) {
         setStatus('unauthenticated');
         return;
@@ -58,7 +66,10 @@ function ProtectedRoute({ children }) {
 export default function App() {
   return (
     <Routes>
-      <Route path="/auth" element={<Auth />} />
+      <Route
+        path="/auth"
+        element={DEMO_AUTH_DISABLED ? <Navigate to="/dashboard" replace /> : <Auth />}
+      />
       <Route
         path="/dashboard"
         element={

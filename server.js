@@ -1,4 +1,5 @@
 import cors from 'cors';
+import { randomBytes } from 'crypto';
 import dotenv from 'dotenv';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
@@ -12,16 +13,25 @@ dotenv.config();
 const app = express();
 const port = Number(process.env.PORT) || 4242;
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-const allowedOrigins = (process.env.CLIENT_URLS || clientUrl)
-  .split(',')
+const allowedOrigins = [
+  clientUrl,
+  'https://ari-lottery.vercel.app',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  ...(process.env.CLIENT_URLS || '').split(','),
+]
   .map((origin) => origin.trim())
   .filter(Boolean);
+const allowedOriginSet = new Set(allowedOrigins);
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const adminApiKey = process.env.ADMIN_API_KEY;
 const cronDisabled = process.env.DISABLE_LOTTERY_CRON === 'true';
+const demoAuthDisabled = process.env.DEMO_AUTH_DISABLED === 'true';
+const configuredDemoUserId = process.env.DEMO_USER_ID || '00000000-0000-4000-8000-000000000001';
+const demoUserEmail = process.env.DEMO_USER_EMAIL || 'demo@arilottery.local';
 const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : null;
 const supabaseAdmin =
   supabaseUrl && supabaseServiceRoleKey
@@ -35,6 +45,7 @@ const supabaseAdmin =
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let lotteryTask = null;
+let demoUserCache = null;
 
 app.set('trust proxy', 1);
 
@@ -50,6 +61,127 @@ function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function toDemoUser(user = {}) {
+  return {
+    id: user.id || configuredDemoUserId,
+    email: user.email || demoUserEmail,
+    created_at: user.created_at || new Date('2026-07-06T00:00:00.000Z').toISOString(),
+    is_demo: true,
+  };
+}
+
+async function findAuthUserByEmail(email) {
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage: 100,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const user = data?.users?.find((candidate) => candidate.email === email);
+
+    if (user) {
+      return user;
+    }
+
+    if (!data?.users || data.users.length < 100) {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+async function ensureDemoUser() {
+  if (demoUserCache) {
+    return demoUserCache;
+  }
+
+  if (!supabaseAdmin) {
+    demoUserCache = toDemoUser();
+    return demoUserCache;
+  }
+
+  if (uuidPattern.test(configuredDemoUserId)) {
+    const { data, error } = await supabaseAdmin.auth.admin.getUserById(configuredDemoUserId);
+
+    if (data?.user) {
+      demoUserCache = toDemoUser(data.user);
+      return demoUserCache;
+    }
+
+    if (error && error.status !== 404) {
+      console.warn('Unable to verify configured demo user:', error.message);
+    }
+  }
+
+  const password = randomBytes(24).toString('hex');
+  const attributes = {
+    email: demoUserEmail,
+    password,
+    email_confirm: true,
+    user_metadata: {
+      name: 'ARI Lottery Demo User',
+      demo_auth_disabled: true,
+    },
+    app_metadata: {
+      role: 'demo',
+    },
+  };
+
+  if (uuidPattern.test(configuredDemoUserId)) {
+    // DEMO MODE ONLY: keep the demo user id stable for FK-backed token records.
+    // Remove this branch when DEMO_AUTH_DISABLED=false and normal Supabase Auth returns.
+    attributes.id = configuredDemoUserId;
+  }
+
+  let { data, error } = await supabaseAdmin.auth.admin.createUser(attributes);
+
+  if (error && attributes.id) {
+    const fallbackAttributes = { ...attributes };
+    delete fallbackAttributes.id;
+    ({ data, error } = await supabaseAdmin.auth.admin.createUser(fallbackAttributes));
+  }
+
+  if (error) {
+    const existingUser = await findAuthUserByEmail(demoUserEmail);
+
+    if (existingUser) {
+      demoUserCache = toDemoUser(existingUser);
+      return demoUserCache;
+    }
+
+    throw new Error(
+      `Unable to create demo user. Set DEMO_USER_ID to an existing Supabase auth user id. ${error.message}`,
+    );
+  }
+
+  if (data?.user?.id !== configuredDemoUserId) {
+    console.warn(
+      `Demo user id resolved to ${data?.user?.id}; set DEMO_USER_ID to this value to keep demo metadata stable.`,
+    );
+  }
+
+  demoUserCache = toDemoUser(data?.user);
+  return demoUserCache;
+}
+
+async function resolveCheckoutUserId(userId) {
+  if (demoAuthDisabled) {
+    const demoUser = await ensureDemoUser();
+    return demoUser.id;
+  }
+
+  if (typeof userId === 'string' && uuidPattern.test(userId)) {
+    return userId;
+  }
+
+  return null;
 }
 
 async function withRetry(operation, { label, retries = 3, baseDelayMs = 250 } = {}) {
@@ -91,7 +223,7 @@ const paymentLimiter = rateLimit({
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || allowedOriginSet.has(origin)) {
         callback(null, true);
         return;
       }
@@ -218,8 +350,191 @@ app.get('/health', (_request, response) => {
     webhookConfigured: Boolean(stripeWebhookSecret),
     supabaseConfigured: Boolean(supabaseAdmin),
     lotterySchedulerConfigured: Boolean(lotteryTask),
+    demoAuthDisabled,
+    demoUserId: demoAuthDisabled ? configuredDemoUserId : null,
     environment: process.env.NODE_ENV || 'development',
   });
+});
+
+app.get('/demo/user', async (_request, response) => {
+  if (!demoAuthDisabled) {
+    response.status(404).json({ error: 'Demo auth bypass is disabled.' });
+    return;
+  }
+
+  try {
+    const user = await ensureDemoUser();
+    response.json({ user });
+  } catch (error) {
+    console.error('Demo user resolution failed:', error);
+    response.status(500).json({ error: 'Unable to resolve demo user.' });
+  }
+});
+
+app.get('/demo/dashboard', async (_request, response) => {
+  if (!demoAuthDisabled) {
+    response.status(404).json({ error: 'Demo auth bypass is disabled.' });
+    return;
+  }
+
+  if (!supabaseAdmin) {
+    response.status(500).json({ error: 'Supabase service role is required for demo data.' });
+    return;
+  }
+
+  try {
+    const user = await ensureDemoUser();
+
+    const [
+      tokensResult,
+      activeCountResult,
+      usedCountResult,
+      transactionsResult,
+      transactionTotalsResult,
+      drawsResult,
+      winsResult,
+    ] = await Promise.all([
+      supabaseAdmin
+        .from('lottery_tokens')
+        .select('id, token_number, status, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(8),
+      supabaseAdmin
+        .from('lottery_tokens')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('status', 'active'),
+      supabaseAdmin
+        .from('lottery_tokens')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('status', 'used'),
+      supabaseAdmin
+        .from('transactions')
+        .select('id, stripe_payment_id, amount, tokens_purchased, status, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(5),
+      supabaseAdmin
+        .from('transactions')
+        .select('amount, tokens_purchased')
+        .eq('user_id', user.id),
+      supabaseAdmin
+        .from('lottery_draws')
+        .select(
+          'id, draw_number, winner_token_id, token_count, total_pool, ari_share, winner_share, platform_share, created_at',
+        )
+        .order('created_at', { ascending: false })
+        .limit(5),
+      supabaseAdmin
+        .from('winners')
+        .select('id, prize_amount, created_at, lottery_tokens(token_number), lottery_draws(draw_number)')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(3),
+    ]);
+
+    const firstError =
+      tokensResult.error ||
+      activeCountResult.error ||
+      usedCountResult.error ||
+      transactionsResult.error ||
+      transactionTotalsResult.error ||
+      drawsResult.error ||
+      winsResult.error;
+
+    if (firstError) {
+      throw firstError;
+    }
+
+    const transactionTotals = transactionTotalsResult.data ?? [];
+
+    response.json({
+      user,
+      tokens: tokensResult.data ?? [],
+      transactions: transactionsResult.data ?? [],
+      draws: drawsResult.data ?? [],
+      ownWins: winsResult.data ?? [],
+      summary: {
+        activeTokens: activeCountResult.count ?? 0,
+        usedTokens: usedCountResult.count ?? 0,
+        spent: transactionTotals.reduce(
+          (sum, transaction) => sum + Number(transaction.amount || 0),
+          0,
+        ),
+        purchased: transactionTotals.reduce(
+          (sum, transaction) => sum + Number(transaction.tokens_purchased || 0),
+          0,
+        ),
+      },
+    });
+  } catch (error) {
+    console.error('Demo dashboard fetch failed:', error);
+    response.status(500).json({ error: 'Unable to load demo dashboard data.' });
+  }
+});
+
+app.get('/demo/tokens', async (_request, response) => {
+  if (!demoAuthDisabled) {
+    response.status(404).json({ error: 'Demo auth bypass is disabled.' });
+    return;
+  }
+
+  if (!supabaseAdmin) {
+    response.status(500).json({ error: 'Supabase service role is required for demo data.' });
+    return;
+  }
+
+  try {
+    const user = await ensureDemoUser();
+    const { data, error } = await supabaseAdmin
+      .from('lottery_tokens')
+      .select('id, token_number, status, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (error) {
+      throw error;
+    }
+
+    response.json({ user, tokens: data ?? [] });
+  } catch (error) {
+    console.error('Demo tokens fetch failed:', error);
+    response.status(500).json({ error: 'Unable to load demo tokens.' });
+  }
+});
+
+app.get('/demo/transactions', async (_request, response) => {
+  if (!demoAuthDisabled) {
+    response.status(404).json({ error: 'Demo auth bypass is disabled.' });
+    return;
+  }
+
+  if (!supabaseAdmin) {
+    response.status(500).json({ error: 'Supabase service role is required for demo data.' });
+    return;
+  }
+
+  try {
+    const user = await ensureDemoUser();
+    const { data, error } = await supabaseAdmin
+      .from('transactions')
+      .select('id, stripe_payment_id, amount, tokens_purchased, status, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (error) {
+      throw error;
+    }
+
+    response.json({ user, transactions: data ?? [] });
+  } catch (error) {
+    console.error('Demo transactions fetch failed:', error);
+    response.status(500).json({ error: 'Unable to load demo transactions.' });
+  }
 });
 
 app.post('/run-lottery', paymentLimiter, async (request, response) => {
@@ -255,8 +570,17 @@ app.post('/create-checkout-session', paymentLimiter, async (request, response) =
 
   const { user_id: userId, quantity } = request.body ?? {};
   const tokenQuantity = Number(quantity);
+  let checkoutUserId;
 
-  if (typeof userId !== 'string' || !uuidPattern.test(userId)) {
+  try {
+    checkoutUserId = await resolveCheckoutUserId(userId);
+  } catch (error) {
+    console.error('Checkout user resolution failed:', error);
+    response.status(500).json({ error: 'Unable to resolve checkout user.' });
+    return;
+  }
+
+  if (!checkoutUserId) {
     response.status(400).json({ error: 'A valid user_id is required.' });
     return;
   }
@@ -283,7 +607,8 @@ app.post('/create-checkout-session', paymentLimiter, async (request, response) =
         },
       ],
       metadata: {
-        user_id: userId,
+        user_id: checkoutUserId,
+        demo_auth_disabled: String(demoAuthDisabled),
         quantity: String(tokenQuantity),
       },
       success_url: `${clientUrl}/dashboard`,

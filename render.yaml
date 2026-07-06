@@ -13,9 +13,9 @@ services:
       - key: PORT
         value: 10000
       - key: CLIENT_URL
-        value: https://app.ari-platform.com
+        value: https://ari-lottery.vercel.app
       - key: CLIENT_URLS
-        value: https://app.ari-platform.com
+        value: https://ari-lottery.vercel.app
       - key: CRON_SCHEDULE
         value: "0 0 */3 * *"
       - key: DISABLE_LOTTERY_CRON
@@ -25,8 +25,14 @@ services:
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
       - key: SUPABASE_URL
-        sync: false
+        value: https://colsiffyvziuydfldaij.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: DEMO_AUTH_DISABLED
+        value: "true"
+      - key: DEMO_USER_ID
+        value: 00000000-0000-4000-8000-000000000001
+      - key: DEMO_USER_EMAIL
+        value: demo@arilottery.local
       - key: ADMIN_API_KEY
         sync: false

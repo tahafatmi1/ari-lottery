@@ -4,6 +4,8 @@ import PageLoader from '../components/PageLoader.jsx';
 import StatCard from '../components/StatCard.jsx';
 import TokensView from '../components/TokensView.jsx';
 import useCurrentUser from '../hooks/useCurrentUser.js';
+import { getDemoTokens } from '../lib/apiClient.js';
+import { DEMO_AUTH_DISABLED } from '../lib/demoMode.js';
 import { supabase } from '../lib/supabaseClient.js';
 
 export default function Tokens() {
@@ -20,6 +22,23 @@ export default function Tokens() {
     async function loadTokens() {
       setLoading(true);
       setError('');
+
+      if (DEMO_AUTH_DISABLED) {
+        try {
+          const payload = await getDemoTokens();
+
+          if (!isMounted) return;
+
+          setTokens(payload.tokens ?? []);
+        } catch (tokenError) {
+          if (!isMounted) return;
+
+          setError(tokenError.message);
+        }
+
+        setLoading(false);
+        return;
+      }
 
       const { data, error: tokenError } = await supabase
         .from('lottery_tokens')
@@ -40,6 +59,15 @@ export default function Tokens() {
     }
 
     loadTokens();
+
+    if (DEMO_AUTH_DISABLED) {
+      const refreshTimer = window.setInterval(loadTokens, 15000);
+
+      return () => {
+        isMounted = false;
+        window.clearInterval(refreshTimer);
+      };
+    }
 
     const channel = supabase
       .channel(`tokens-page:${user.id}`)

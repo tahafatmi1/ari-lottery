@@ -1,4 +1,5 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { DEMO_AUTH_DISABLED } from '../lib/demoMode.js';
 import { supabase } from '../lib/supabaseClient.js';
 
 const navItems = [
@@ -12,6 +13,10 @@ export default function AppShell({ title, user, children }) {
   const navigate = useNavigate();
 
   async function handleLogout() {
+    if (DEMO_AUTH_DISABLED) {
+      return;
+    }
+
     await supabase.auth.signOut();
     navigate('/auth', { replace: true });
   }
@@ -55,11 +60,12 @@ export default function AppShell({ title, user, children }) {
               </Link>
 
               <button
-                className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+                className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                 type="button"
                 onClick={handleLogout}
+                disabled={DEMO_AUTH_DISABLED}
               >
-                Logout
+                {DEMO_AUTH_DISABLED ? 'Demo Mode' : 'Logout'}
               </button>
             </div>
           </div>
@@ -67,7 +73,8 @@ export default function AppShell({ title, user, children }) {
 
         <section className="mx-auto max-w-7xl px-5 py-8">
           <div className="mb-6 rounded-lg border border-white/10 bg-midnight/70 px-4 py-3 text-sm text-slate-300">
-            Signed in as <span className="font-semibold text-white">{user?.email}</span>
+            {DEMO_AUTH_DISABLED ? 'Demo user active: ' : 'Signed in as '}
+            <span className="font-semibold text-white">{user?.email}</span>
           </div>
           {children}
         </section>

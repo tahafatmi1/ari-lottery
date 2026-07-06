@@ -1,6 +1,7 @@
 import AppShell from '../components/AppShell.jsx';
 import PageLoader from '../components/PageLoader.jsx';
 import useCurrentUser from '../hooks/useCurrentUser.js';
+import { DEMO_AUTH_DISABLED } from '../lib/demoMode.js';
 import { formatDate, maskEmail } from '../utils/formatters.js';
 
 export default function Profile() {
@@ -19,8 +20,9 @@ export default function Profile() {
             {user?.email}
           </h2>
           <p className="mt-3 text-sm leading-6 text-slate-300">
-            Profile settings are read-only while ARI Lottery keeps account identity anchored to
-            Supabase authentication.
+            {DEMO_AUTH_DISABLED
+              ? 'Profile settings are read-only while Supabase authentication is temporarily bypassed for the client demo.'
+              : 'Profile settings are read-only while ARI Lottery keeps account identity anchored to Supabase authentication.'}
           </p>
         </section>
 
@@ -37,11 +39,15 @@ export default function Profile() {
             </div>
             <div className="rounded-lg border border-white/10 bg-midnight/60 p-4">
               <p className="text-sm text-slate-400">Authentication</p>
-              <p className="mt-2 font-semibold text-white">Supabase session</p>
+              <p className="mt-2 font-semibold text-white">
+                {DEMO_AUTH_DISABLED ? 'Demo bypass' : 'Supabase session'}
+              </p>
             </div>
             <div className="rounded-lg border border-white/10 bg-midnight/60 p-4">
               <p className="text-sm text-slate-400">Data access</p>
-              <p className="mt-2 font-semibold text-white">RLS protected</p>
+              <p className="mt-2 font-semibold text-white">
+                {DEMO_AUTH_DISABLED ? 'Backend demo API' : 'RLS protected'}
+              </p>
             </div>
           </div>
         </section>

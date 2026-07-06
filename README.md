@@ -18,15 +18,22 @@ For production deployment, see [docs/deployment.md](C:/Users/dell/OneDrive/Docum
    VITE_SUPABASE_URL=your_supabase_project_url
    VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
    VITE_STRIPE_PUBLISHABLE_KEY=your_stripe_publishable_key
-   VITE_API_BASE_URL=http://localhost:4242
+   VITE_API_BASE_URL=https://ari-lottery.onrender.com
+   VITE_DEMO_AUTH_DISABLED=true
+   VITE_DEMO_USER_ID=00000000-0000-4000-8000-000000000001
+   VITE_DEMO_USER_EMAIL=demo@arilottery.local
 
    STRIPE_SECRET_KEY=your_stripe_secret_key
    STRIPE_WEBHOOK_SECRET=your_stripe_webhook_secret
-   SUPABASE_URL=your_supabase_project_url
+   SUPABASE_URL=https://colsiffyvziuydfldaij.supabase.co
    SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+   DEMO_AUTH_DISABLED=true
+   DEMO_USER_ID=00000000-0000-4000-8000-000000000001
+   DEMO_USER_EMAIL=demo@arilottery.local
    CRON_SCHEDULE="0 0 */3 * *"
    ADMIN_API_KEY=change_me_for_manual_draws
-   CLIENT_URL=http://localhost:5173
+   CLIENT_URL=https://ari-lottery.vercel.app
+   CLIENT_URLS=https://ari-lottery.vercel.app
    PORT=4242
    ```
 
@@ -50,18 +57,36 @@ For production deployment, see [docs/deployment.md](C:/Users/dell/OneDrive/Docum
 
 ## Routes
 
-- `/auth` - email/password login and signup
-- `/dashboard` - protected dashboard shell
-- `/tokens` - protected token balance and token history
-- `/transactions` - protected Stripe payment history
-- `/profile` - protected account profile and read-only settings
-- `/buy` - protected Stripe Checkout token purchase page
+- `/auth` - email/password login and signup when demo auth is disabled
+- `/dashboard` - dashboard shell
+- `/tokens` - token balance and token history
+- `/transactions` - Stripe payment history
+- `/profile` - account profile and read-only settings
+- `/buy` - Stripe Checkout token purchase page
+
+## Demo Auth Bypass
+
+Client demo mode is currently enabled with:
+
+```bash
+VITE_DEMO_AUTH_DISABLED=true
+DEMO_AUTH_DISABLED=true
+```
+
+In this mode, the frontend skips Supabase login/signup and uses a demo user. The
+backend assigns that demo user to Stripe Checkout metadata and serves dashboard,
+token, transaction, and draw data through service-role demo endpoints. This keeps
+RLS policies unchanged and makes the bypass reversible.
+
+To restore Supabase authentication, set both flags to `false`, restart Vite and
+the API, and use the `/auth` flow again.
 
 ## Payment Flow
 
-The `/buy` page sends the authenticated Supabase user ID and token quantity to
-`POST /create-checkout-session`. Stripe Checkout handles payment and redirects
-successful payments back to `/dashboard`.
+In demo mode, the `/buy` page sends only the token quantity to
+`POST /create-checkout-session`; the backend assigns the demo user ID. With demo
+mode disabled, the authenticated Supabase user ID is sent again. Stripe Checkout
+handles payment and redirects successful payments back to `/dashboard`.
 
 ## Webhook Token Minting
 
@@ -70,7 +95,7 @@ successful payments back to `/dashboard`.
 
    ```bash
    STRIPE_WEBHOOK_SECRET=whsec_...
-   SUPABASE_URL=your_supabase_project_url
+   SUPABASE_URL=https://colsiffyvziuydfldaij.supabase.co
    SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
    ```
 

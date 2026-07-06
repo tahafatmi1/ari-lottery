@@ -4,6 +4,8 @@ import PageLoader from '../components/PageLoader.jsx';
 import StatCard from '../components/StatCard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import useCurrentUser from '../hooks/useCurrentUser.js';
+import { getDemoTransactions } from '../lib/apiClient.js';
+import { DEMO_AUTH_DISABLED } from '../lib/demoMode.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { formatCurrency, formatDateTime, maskIdentifier } from '../utils/formatters.js';
 
@@ -21,6 +23,23 @@ export default function Transactions() {
     async function loadTransactions() {
       setLoading(true);
       setError('');
+
+      if (DEMO_AUTH_DISABLED) {
+        try {
+          const payload = await getDemoTransactions();
+
+          if (!isMounted) return;
+
+          setTransactions(payload.transactions ?? []);
+        } catch (transactionError) {
+          if (!isMounted) return;
+
+          setError(transactionError.message);
+        }
+
+        setLoading(false);
+        return;
+      }
 
       const { data, error: transactionError } = await supabase
         .from('transactions')
@@ -41,6 +60,15 @@ export default function Transactions() {
     }
 
     loadTransactions();
+
+    if (DEMO_AUTH_DISABLED) {
+      const refreshTimer = window.setInterval(loadTransactions, 15000);
+
+      return () => {
+        isMounted = false;
+        window.clearInterval(refreshTimer);
+      };
+    }
 
     return () => {
       isMounted = false;
