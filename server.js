@@ -49,6 +49,19 @@ let demoUserCache = null;
 
 app.set('trust proxy', 1);
 
+function isAllowedOrigin(origin) {
+  if (!origin || allowedOriginSet.has(origin)) {
+    return true;
+  }
+
+  try {
+    const { hostname, protocol } = new URL(origin);
+    return protocol === 'https:' && hostname.endsWith('.vercel.app');
+  } catch {
+    return false;
+  }
+}
+
 function requestHasAdminAccess(request) {
   if (!adminApiKey) {
     return false;
@@ -184,6 +197,40 @@ async function resolveCheckoutUserId(userId) {
   return null;
 }
 
+function logDemoQueryError(label, error) {
+  if (error) {
+    console.warn(`Demo ${label} query failed:`, error.message || error);
+  }
+}
+
+function emptyResult(data = []) {
+  return {
+    data,
+    count: Array.isArray(data) ? data.length : 0,
+    error: null,
+  };
+}
+
+async function runDemoQuery(label, query, fallback = []) {
+  try {
+    const result = await query;
+
+    if (result.error) {
+      logDemoQueryError(label, result.error);
+      return emptyResult(fallback);
+    }
+
+    return {
+      data: result.data ?? fallback,
+      count: result.count ?? (Array.isArray(result.data) ? result.data.length : 0),
+      error: null,
+    };
+  } catch (error) {
+    logDemoQueryError(label, error);
+    return emptyResult(fallback);
+  }
+}
+
 async function withRetry(operation, { label, retries = 3, baseDelayMs = 250 } = {}) {
   let lastError;
 
@@ -223,7 +270,7 @@ const paymentLimiter = rateLimit({
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOriginSet.has(origin)) {
+      if (isAllowedOrigin(origin)) {
         callback(null, true);
         return;
       }
@@ -394,59 +441,67 @@ app.get('/demo/dashboard', async (_request, response) => {
       drawsResult,
       winsResult,
     ] = await Promise.all([
-      supabaseAdmin
-        .from('lottery_tokens')
-        .select('id, token_number, status, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(8),
-      supabaseAdmin
-        .from('lottery_tokens')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .eq('status', 'active'),
-      supabaseAdmin
-        .from('lottery_tokens')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .eq('status', 'used'),
-      supabaseAdmin
-        .from('transactions')
-        .select('id, stripe_payment_id, amount, tokens_purchased, status, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(5),
-      supabaseAdmin
-        .from('transactions')
-        .select('amount, tokens_purchased')
-        .eq('user_id', user.id),
-      supabaseAdmin
-        .from('lottery_draws')
-        .select(
-          'id, draw_number, winner_token_id, token_count, total_pool, ari_share, winner_share, platform_share, created_at',
-        )
-        .order('created_at', { ascending: false })
-        .limit(5),
-      supabaseAdmin
-        .from('winners')
-        .select('id, prize_amount, created_at, lottery_tokens(token_number), lottery_draws(draw_number)')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(3),
+      runDemoQuery(
+        'dashboard tokens',
+        supabaseAdmin
+          .from('lottery_tokens')
+          .select('id, token_number, status, created_at')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(8),
+      ),
+      runDemoQuery(
+        'dashboard active token count',
+        supabaseAdmin
+          .from('lottery_tokens')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('status', 'active'),
+      ),
+      runDemoQuery(
+        'dashboard used token count',
+        supabaseAdmin
+          .from('lottery_tokens')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('status', 'used'),
+      ),
+      runDemoQuery(
+        'dashboard transactions',
+        supabaseAdmin
+          .from('transactions')
+          .select('id, stripe_payment_id, amount, tokens_purchased, status, created_at')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(5),
+      ),
+      runDemoQuery(
+        'dashboard transaction totals',
+        supabaseAdmin
+          .from('transactions')
+          .select('amount, tokens_purchased')
+          .eq('user_id', user.id),
+      ),
+      runDemoQuery(
+        'dashboard draws',
+        supabaseAdmin
+          .from('lottery_draws')
+          .select(
+            'id, draw_number, winner_token_id, token_count, total_pool, ari_share, winner_share, platform_share, created_at',
+          )
+          .order('created_at', { ascending: false })
+          .limit(5),
+      ),
+      runDemoQuery(
+        'dashboard wins',
+        supabaseAdmin
+          .from('winners')
+          .select('id, prize_amount, created_at, lottery_tokens(token_number), lottery_draws(draw_number)')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(3),
+      ),
     ]);
-
-    const firstError =
-      tokensResult.error ||
-      activeCountResult.error ||
-      usedCountResult.error ||
-      transactionsResult.error ||
-      transactionTotalsResult.error ||
-      drawsResult.error ||
-      winsResult.error;
-
-    if (firstError) {
-      throw firstError;
-    }
 
     const transactionTotals = transactionTotalsResult.data ?? [];
 
@@ -488,16 +543,15 @@ app.get('/demo/tokens', async (_request, response) => {
 
   try {
     const user = await ensureDemoUser();
-    const { data, error } = await supabaseAdmin
-      .from('lottery_tokens')
-      .select('id, token_number, status, created_at')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(100);
-
-    if (error) {
-      throw error;
-    }
+    const { data } = await runDemoQuery(
+      'tokens page tokens',
+      supabaseAdmin
+        .from('lottery_tokens')
+        .select('id, token_number, status, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(100),
+    );
 
     response.json({ user, tokens: data ?? [] });
   } catch (error) {
@@ -519,16 +573,15 @@ app.get('/demo/transactions', async (_request, response) => {
 
   try {
     const user = await ensureDemoUser();
-    const { data, error } = await supabaseAdmin
-      .from('transactions')
-      .select('id, stripe_payment_id, amount, tokens_purchased, status, created_at')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(100);
-
-    if (error) {
-      throw error;
-    }
+    const { data } = await runDemoQuery(
+      'transactions page transactions',
+      supabaseAdmin
+        .from('transactions')
+        .select('id, stripe_payment_id, amount, tokens_purchased, status, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(100),
+    );
 
     response.json({ user, transactions: data ?? [] });
   } catch (error) {
