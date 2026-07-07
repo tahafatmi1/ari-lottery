@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import About from './pages/About.jsx';
 import Auth from './pages/Auth.jsx';
 import BuyTokens from './pages/BuyTokens.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import FAQ from './pages/FAQ.jsx';
+import Home from './pages/Home.jsx';
 import Profile from './pages/Profile.jsx';
+import Settings from './pages/Settings.jsx';
 import Tokens from './pages/Tokens.jsx';
 import Transactions from './pages/Transactions.jsx';
 import { DEMO_AUTH_DISABLED } from './lib/demoMode.js';
@@ -66,6 +70,9 @@ function ProtectedRoute({ children }) {
 export default function App() {
   return (
     <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/about" element={<About />} />
+      <Route path="/faq" element={<FAQ />} />
       <Route
         path="/auth"
         element={DEMO_AUTH_DISABLED ? <Navigate to="/dashboard" replace /> : <Auth />}
@@ -110,7 +117,15 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <Settings />
+          </ProtectedRoute>
+        }
+      />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

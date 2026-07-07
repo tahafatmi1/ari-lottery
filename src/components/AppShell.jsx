@@ -3,9 +3,11 @@ import { DEMO_AUTH_DISABLED } from '../lib/demoMode.js';
 import { supabase } from '../lib/supabaseClient.js';
 
 const navItems = [
+  { label: 'Home', to: '/' },
   { label: 'Dashboard', to: '/dashboard' },
   { label: 'Tokens', to: '/tokens' },
   { label: 'Transactions', to: '/transactions' },
+  { label: 'Settings', to: '/settings' },
   { label: 'Profile', to: '/profile' },
 ];
 
@@ -44,6 +46,7 @@ export default function AppShell({ title, user, children }) {
                           : 'border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10'
                       }`
                     }
+                    end={item.to === '/'}
                     key={item.to}
                     to={item.to}
                   >
